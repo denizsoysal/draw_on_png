@@ -3,6 +3,7 @@ from tkinter import filedialog, simpledialog
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 import math
 import io
+import os
 
 # ---------------------------------------------------------------------
 # Base shape class
@@ -53,7 +54,6 @@ class RectangleShape(Shape):
 
     def draw(self, canvas):
         corners = self.get_corners()
-        # Use a thicker line width (4)
         if self.item is None:
             self.item = canvas.create_polygon(corners, fill="", outline="black", width=4)
         else:
@@ -155,7 +155,7 @@ class HourglassShape(Shape):
 
     def _get_coords(self):
         # Use the requested order for the hourglass:
-        # e.g. local coordinates: [ -w/2, -h/2,  w/2,  h/2,  -w/2,  h/2,  w/2, -h/2,  -w/2, -h/2 ]
+        # local coordinates: [ -w/2, -h/2,  w/2,  h/2,  -w/2,  h/2,  w/2, -h/2,  -w/2, -h/2 ]
         w2 = self.width / 2
         h2 = self.height / 2
         local_pts = [
@@ -238,7 +238,7 @@ class LineShape(Shape):
 # TextShape (editable multi-line text, not rotatable)
 # ---------------------------------------------------------------------
 class TextShape(Shape):
-    def __init__(self, x, y, text="Edit me", font_size=20):
+    def __init__(self, x, y, text="", font_size=20):
         super().__init__()
         self.base_x = x
         self.base_y = y
@@ -247,14 +247,14 @@ class TextShape(Shape):
         self.y = y
         self.text = text
         self.font_size = font_size
-        self.angle = 0  # Text is no longer rotatable.
+        self.angle = 0  # Text is not rotatable.
         self.bbox = None
         self.text_tk = None
 
     def draw(self, canvas):
         if self.item is not None:
             canvas.delete(self.item)
-        # Use bold font
+        # Bold text
         self.item = canvas.create_text(self.x, self.y, text=self.text,
                                        font=("Arial", self.font_size, "bold"),
                                        fill="black", anchor="nw")
@@ -276,8 +276,6 @@ class TextShape(Shape):
         self.handles["bbox"] = box
         rsz = canvas.create_rectangle(x2 - hs, y2 - hs, x2 + hs, y2 + hs, fill="blue")
         self.handles["resize"] = rsz
-        # Do not draw a rotate handle for text.
-        # (Text is not rotatable.)
         self.bbox = canvas.bbox(self.item)
 
     def edit_text(self, parent):
@@ -316,14 +314,19 @@ def _point_in_polygon(px, py, coords):
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("Gaz plani")
+        self.root.title("Gaz Plani  - Hamit SOYSAL")
+
+        # Bind Delete key for deletion
+        self.root.bind("<Delete>", lambda event: self.delete_selected_shape())
+
         # Menu
         menubar = tk.Menu(root)
         filemenu = tk.Menu(menubar, tearoff=0)
-        filemenu.add_command(label="çizim aç", command=self.load_image)
-        filemenu.add_command(label="çizim kaydet", command=self.save_image)
-        menubar.add_cascade(label="çizim aç veya kaydet", menu=filemenu)
+        filemenu.add_command(label="Aç", command=self.load_image)
+        filemenu.add_command(label="Kaydet", command=self.save_image)
+        menubar.add_cascade(label="Aç veya Kaydet", menu=filemenu)
         root.config(menu=menubar)
+
         # Toolbar
         self.toolbar = tk.Frame(root, bd=1, relief=tk.RAISED)
         self.toolbar.pack(side=tk.LEFT, fill=tk.Y)
@@ -331,6 +334,10 @@ class App:
         self.edit_text_btn = tk.Button(self.toolbar, text="Edit Text", command=self.edit_text_shape)
         self.edit_text_btn.pack(pady=5)
         self.edit_text_btn.config(state=tk.DISABLED)
+        # Delete button (labeled 'SIL')
+        self.delete_btn = tk.Button(self.toolbar, text="SIL", command=self.delete_selected_shape)
+        self.delete_btn.pack(pady=5)
+
         # Canvas + scrollbars
         self.canvas_frame = tk.Frame(root)
         self.canvas_frame.pack(fill=tk.BOTH, expand=True)
@@ -342,26 +349,31 @@ class App:
                                 xscrollcommand=self.h_scrollbar.set,
                                 yscrollcommand=self.v_scrollbar.set)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
         # State variables
         self.image = None
         self.original_image = None
         self.image_tk = None
         self.image_item = None
+
         self.shapes = []
         self.selected_shape = None
         self.current_tool = "select"
         self.current_shape = None
         self.mode = "idle"
         self.drag_data = {}
+
         self.canvas_width = 800
         self.canvas_height = 600
         self.base_canvas_width = self.canvas_width
         self.base_canvas_height = self.canvas_height
+
         # Zoom
         self.zoom_level = 1.0
         self.zoom_step = 0.1
         self.min_zoom = 0.1
         self.max_zoom = 5.0
+
         self.canvas.config(width=self.canvas_width, height=self.canvas_height)
         self.canvas.config(scrollregion=(0, 0, self.canvas_width, self.canvas_height))
         self.canvas.bind("<MouseWheel>", self.on_mousewheel_scroll)
@@ -374,6 +386,7 @@ class App:
         self.status_bar = tk.Label(root, text="Zoom: 100%", bd=1, relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         self.set_select_tool()
+        self.load_default_image()  # Opens an image by default on startup
 
     def canvas_xscroll(self, *args):
         self.canvas.xview(*args)
@@ -394,7 +407,8 @@ class App:
             cvs.bind("<Button-1>", lambda e: command())
             return cvs
         def draw_select(cvs):
-            cvs.create_line(10, 10, 30, 30, width=4, arrow=tk.LAST)
+            cvs.create_text(20, 20, text="Seç", font=("Arial", 12, "bold"))
+            # cvs.create_line(10, 10, 30, 30, width=4, arrow=tk.LAST)
         self.select_button = make_button(draw_select, self.set_select_tool)
         def draw_rect(cvs):
             cvs.create_rectangle(10, 10, 30, 30, outline="black", width=4)
@@ -410,7 +424,7 @@ class App:
             cvs.create_line(10, 20, 30, 20, fill="black", width=4)
         self.line_button = make_button(draw_line, self.set_line_tool)
         def draw_text(cvs):
-            cvs.create_text(20, 20, text="T", font=("Arial", 18, "bold"))
+            cvs.create_text(20, 20, text="Text", font=("Arial", 12, "bold"))
         self.text_button = make_button(draw_text, self.set_text_tool)
         def draw_plus(cvs):
             cvs.create_oval(10, 10, 30, 30, outline="black", width=4)
@@ -434,38 +448,46 @@ class App:
     # -----------------------------------------------------------------
     # Tool setters
     # -----------------------------------------------------------------
+    # In the tool setters, reset the mode and deselect any active shape.
     def set_select_tool(self):
         self.current_tool = "select"
+        self.deselect_all()
+        self.mode = "idle"
         self.highlight_tool_button(self.select_button)
         self.edit_text_btn.config(state=tk.DISABLED)
 
     def set_rectangle_tool(self):
         self.current_tool = "rectangle"
         self.deselect_all()
+        self.mode = "idle"
         self.highlight_tool_button(self.rect_button)
         self.edit_text_btn.config(state=tk.DISABLED)
 
     def set_circle_tool(self):
         self.current_tool = "circle"
         self.deselect_all()
+        self.mode = "idle"
         self.highlight_tool_button(self.circle_button)
         self.edit_text_btn.config(state=tk.DISABLED)
 
     def set_hourglass_tool(self):
         self.current_tool = "hourglass"
         self.deselect_all()
+        self.mode = "idle"
         self.highlight_tool_button(self.hourglass_button)
         self.edit_text_btn.config(state=tk.DISABLED)
 
     def set_line_tool(self):
         self.current_tool = "line"
         self.deselect_all()
+        self.mode = "idle"
         self.highlight_tool_button(self.line_button)
         self.edit_text_btn.config(state=tk.DISABLED)
 
     def set_text_tool(self):
         self.current_tool = "text"
         self.deselect_all()
+        self.mode = "idle"
         self.highlight_tool_button(self.text_button)
         self.edit_text_btn.config(state=tk.DISABLED)
 
@@ -576,6 +598,29 @@ class App:
                 s.draw(self.canvas)
                 if s.selected:
                     s.draw_handles(self.canvas)
+    
+    def load_default_image(self):
+        default_image_path = "elgac-1.png"  # Update this path
+        if not os.path.exists(default_image_path):
+            print("Default image path does not exist:", default_image_path)
+            return
+        try:
+            self.original_image = Image.open(default_image_path)
+            self.image = self.original_image.copy()
+            self.image_tk = ImageTk.PhotoImage(self.image)
+            self.canvas_width = self.image.width
+            self.canvas_height = self.image.height
+            self.base_canvas_width = self.image.width
+            self.base_canvas_height = self.image.height
+            self.canvas.config(scrollregion=(0, 0, self.canvas_width, self.canvas_height))
+            if self.image_item:
+                self.canvas.delete(self.image_item)
+            self.image_item = self.canvas.create_image(0, 0, anchor="nw", image=self.image_tk)
+            self.canvas.tag_lower(self.image_item)
+            self.zoom_level = 1.0
+            self.update_status_bar()
+        except Exception as e:
+            print("Could not load default image:", e)
 
     def save_image(self):
         path = filedialog.asksaveasfilename(defaultextension=".png",
@@ -628,11 +673,31 @@ class App:
                     if hname in ["resize", "end1", "end2"]:
                         self.mode = "resizing"
                         self.drag_data["handle"] = hname
+                        # If resizing text, store initial values
+                        if isinstance(self.selected_shape, TextShape) and hname == "resize":
+                            self.drag_data["init_x"] = cx
+                            self.drag_data["init_y"] = cy
+                            self.drag_data["init_font_size"] = self.selected_shape.font_size
                         return
                     elif hname == "rotate":
                         self.mode = "rotating"
                         return
-        # Otherwise, check current tool.
+
+        # Check if clicking on an existing shape.
+        for s in reversed(self.shapes):
+            if s.contains_point(cx, cy):
+                self.select_shape(s)
+                self.mode = "move"
+                self.drag_data = {"x": cx, "y": cy}
+                return
+
+        # If no shape is clicked and we are in edit mode, then deselect and switch to idle.
+        if self.mode == "edit":
+            self.deselect_all()
+            self.mode = "idle"
+            return
+
+        # If no shape was clicked and the tool is a drawing tool while in idle mode, create a new shape.
         if self.current_tool in ["rectangle", "circle", "hourglass", "line", "text"] and self.mode == "idle":
             self.mode = "create"
             if self.current_tool == "rectangle":
@@ -644,23 +709,16 @@ class App:
             elif self.current_tool == "line":
                 self.current_shape = LineShape(cx, cy, cx+50, cy)
             elif self.current_tool == "text":
-                self.current_shape = TextShape(cx, cy, "Edit me", 20)
+                self.current_shape = TextShape(cx, cy, "", 20)
             self.shapes.append(self.current_shape)
             self.current_shape.draw(self.canvas)
             self.drag_data = {"x": cx, "y": cy}
             return
+
+        # For the select tool, if no shape is clicked, simply deselect.
         if self.current_tool == "select":
-            clicked = None
-            for s in reversed(self.shapes):
-                if s.contains_point(cx, cy):
-                    clicked = s
-                    break
-            if clicked:
-                self.select_shape(clicked)
-                self.mode = "move"
-                self.drag_data = {"x": cx, "y": cy}
-            else:
-                self.deselect_all()
+            self.deselect_all()
+            self.mode = "idle"
 
     def on_canvas_drag(self, event):
         cx = self.canvas.canvasx(event.x)
@@ -726,36 +784,56 @@ class App:
                     shp.y2 = cy
                     shp.base_x2 = cx / self.zoom_level
                     shp.base_y2 = cy / self.zoom_level
-            elif isinstance(shp, TextShape):
-                dist = math.hypot(cx - shp.x, cy - shp.y)
-                shp.font_size = max(8, int(dist / 3))
-                shp.base_font_size = shp.font_size / self.zoom_level
+            elif isinstance(shp, TextShape) and hname =="resize":
+                if "init_x" in self.drag_data and "init_y" in self.drag_data and "init_font_size" in self.drag_data:
+                    # Compute the initial distance from the text's anchor to the initial click point.
+                    init_distance = math.hypot(self.drag_data["init_x"] - shp.x, self.drag_data["init_y"] - shp.y)
+                    current_distance = math.hypot(cx - shp.x, cy - shp.y)
+                    # Prevent division by zero
+                    if init_distance == 0:
+                        init_distance = 1
+                    ratio = current_distance / init_distance
+                    new_font_size = max(8, int(self.drag_data["init_font_size"] * ratio))
+                    shp.font_size = new_font_size
+                    shp.base_font_size = shp.font_size / self.zoom_level
             shp.draw(self.canvas)
             shp.draw_handles(self.canvas)
         elif self.mode == "rotating":
-            if not isinstance(shp, TextShape):  # Text cannot be rotated
-                dxr = cx - shp.x if hasattr(shp, "x") else 0
-                dyr = cy - shp.y if hasattr(shp, "y") else 0
-                shp.angle = (math.degrees(math.atan2(dyr, dxr)) + 90) % 360
+            if not isinstance(shp, TextShape):
+                # Record initial angles when starting rotation
+                if "init_rotate_angle" not in self.drag_data:
+                    self.drag_data["init_rotate_angle"] = math.degrees(math.atan2(cy - shp.y, cx - shp.x))
+                    self.drag_data["init_shape_angle"] = shp.angle
+                # Calculate the current angle from the shape's center to the mouse
+                current_mouse_angle = math.degrees(math.atan2(cy - shp.y, cx - shp.x))
+                # Compute the change in angle relative to the initial click
+                delta_angle = current_mouse_angle - self.drag_data["init_rotate_angle"]
+                # Update the shape's angle based on its initial angle plus the change
+                shp.angle = (self.drag_data["init_shape_angle"] + delta_angle) % 360
                 shp.draw(self.canvas)
                 shp.draw_handles(self.canvas)
         self.drag_data["x"] = cx
         self.drag_data["y"] = cy
 
     def on_canvas_release(self, event):
+        for key in ["init_rotate_angle", "init_shape_angle"]:
+            if key in self.drag_data:
+                del self.drag_data[key]
         if self.mode == "create" and self.current_shape:
+            # Once the shape is created, select it and remain in edit mode.
             self.select_shape(self.current_shape)
-            # Immediately enter edit mode.
-            self.mode = "edit"
+            self.mode = "edit"  # Stay in edit mode after creation.
             if self.current_tool == "text":
                 self.current_shape.edit_text(self.root)
                 self.current_shape.draw(self.canvas)
                 self.current_shape.draw_handles(self.canvas)
-            else:
-                self.mode = "idle"
+            # Keep the shape selected for editing.
             self.current_shape = None
         else:
-            self.mode = "idle"
+            if self.selected_shape:
+                self.mode = "edit"  # Switch to edit mode after dropping an object.
+            else:
+                self.mode = "idle"
 
     def on_double_click(self, event):
         cx = self.canvas.canvasx(event.x)
@@ -793,6 +871,14 @@ class App:
             self.selected_shape.draw(self.canvas)
             self.selected_shape.draw_handles(self.canvas)
 
+    def delete_selected_shape(self):
+        if self.selected_shape:
+            self.canvas.delete(self.selected_shape.item)
+            self.selected_shape.delete_handles(self.canvas)
+            if self.selected_shape in self.shapes:
+                self.shapes.remove(self.selected_shape)
+            self.selected_shape = None
+            self.edit_text_btn.config(state=tk.DISABLED)
 # ---------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------
