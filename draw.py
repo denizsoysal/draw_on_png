@@ -322,9 +322,9 @@ class App:
         # Menu
         menubar = tk.Menu(root)
         filemenu = tk.Menu(menubar, tearoff=0)
-        filemenu.add_command(label="Aç", command=self.load_image)
+        # filemenu.add_command(label="Aç", command=self.load_image)
         filemenu.add_command(label="Kaydet", command=self.save_image)
-        menubar.add_cascade(label="Aç veya Kaydet", menu=filemenu)
+        menubar.add_cascade(label="Menu", menu=filemenu)
         root.config(menu=menubar)
 
         # Toolbar
