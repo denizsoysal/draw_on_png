@@ -110,7 +110,7 @@ class CircleShape(Shape):
         if self.item is None:
             self.item = canvas.create_oval(self.x - self.radius, self.y - self.radius,
                                            self.x + self.radius, self.y + self.radius,
-                                           fill="", outline="black", width=4)
+                                           fill="", outline="black", width=3)
         else:
             canvas.coords(self.item,
                           self.x - self.radius, self.y - self.radius,
@@ -149,7 +149,7 @@ class HourglassShape(Shape):
     def draw(self, canvas):
         coords = self._get_coords()
         if self.item is None:
-            self.item = canvas.create_polygon(coords, fill="", outline="black", width=4)
+            self.item = canvas.create_polygon(coords, fill="", outline="black", width=3)
         else:
             canvas.coords(self.item, *coords)
 
@@ -209,7 +209,7 @@ class LineShape(Shape):
 
     def draw(self, canvas):
         if self.item is None:
-            self.item = canvas.create_line(self.x1, self.y1, self.x2, self.y2, fill="black", width=4)
+            self.item = canvas.create_line(self.x1, self.y1, self.x2, self.y2, fill="black", width=3)
         else:
             canvas.coords(self.item, self.x1, self.y1, self.x2, self.y2)
 
@@ -572,7 +572,7 @@ class App:
         self.status_bar.config(text=f"Zoom: {pct}%")
 
     # -----------------------------------------------------------------
-    # Load/Save
+    # Load/s
     # -----------------------------------------------------------------
     def load_image(self):
         path = filedialog.askopenfilename(filetypes=[("PNG Images", "*.png")])
@@ -627,13 +627,18 @@ class App:
                                             filetypes=[("PNG Images", "*.png")])
         if not path:
             return
+
+        # Ensure image resolution is the same as the canvas size
         if self.image:
             w, h = self.image.width, self.image.height
             final_img = self.image.copy().convert("RGB")
         else:
             w, h = self.canvas_width, self.canvas_height
             final_img = Image.new("RGB", (w, h), "white")
+
+        # Draw on the image with the same resolution
         draw = ImageDraw.Draw(final_img)
+
         for shp in self.shapes:
             if isinstance(shp, RectangleShape):
                 corners = shp.get_corners()
@@ -657,6 +662,8 @@ class App:
                 except:
                     font = ImageFont.load_default()
                 draw.multiline_text((shp.x, shp.y), shp.text, fill="black", font=font)
+
+        # Save image with high resolution
         final_img.save(path, "PNG")
 
     # -----------------------------------------------------------------
